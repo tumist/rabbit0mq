@@ -142,7 +142,6 @@ main = do
       else ztor zenv renv
 
 rtoz :: ZMQConnectInfo -> RabbitConnectInfo -> IO ()
-rtoz (ZMQConnectInfo _ ts) _ | length ts /= 1 = error "You must provide one and only one topic (regex) in reversed mode"
 rtoz zenv@(ZMQConnectInfo _ ts) renv = withChannel renv $ \ch -> do
    qname <- configChannel' (map E.decodeUtf8 ts) ch 
    infoM "rabbit0mq.main" "RabbitMQ connected (reversed)"
