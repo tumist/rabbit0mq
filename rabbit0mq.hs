@@ -4,6 +4,7 @@
 module Main where
 
 import Data.Text                        (Text)
+import Data.Maybe                       (fromMaybe)
 import Data.Monoid                      ((<>))
 import Control.Monad                    ((<=<), liftM, void, forever, forM_)
 import Control.Exception                (bracket)
@@ -20,18 +21,21 @@ import qualified System.ZMQ3            as Z
 import System.Log.Logger
 import Network.AMQP
 import System.ZMQ3.Monadic
-{- import Control.Concurrent (threadDelay) -}
 
 --------------------------------------------------------------------------------
 -- zmq api
 --------------------------------------------------------------------------------
-data ZMQConnectInfo = ZMQConnectInfo String [B.ByteString] deriving Show
+data ZMQConnectDirection = Bind | Connect
+   deriving Show
+
+data ZMQConnectInfo = ZMQConnectInfo String ZMQConnectDirection [B.ByteString] 
+   deriving Show
 
 defaultZMQConnectInfo :: ZMQConnectInfo
-defaultZMQConnectInfo = ZMQConnectInfo "tcp://127.0.0.1:7006" []
+defaultZMQConnectInfo = ZMQConnectInfo "tcp://127.0.0.1:7006" Bind []
 
 setZMQTopics :: ZMQConnectInfo -> [B.ByteString] -> ZMQConnectInfo
-setZMQTopics (ZMQConnectInfo h _) ts = ZMQConnectInfo h ts
+setZMQTopics (ZMQConnectInfo h dir _) ts = ZMQConnectInfo h dir ts
 
 withMessage :: Receiver t => Socket z t -> ([B.ByteString] -> ZMQ z a) -> ZMQ z a
 withMessage s cb = receiveMulti s >>= cb
@@ -40,17 +44,21 @@ subscribeTopics :: Subscriber t => Socket z t -> [B.ByteString] -> ZMQ z ()
 subscribeTopics s [] = subscribe s B.empty
 subscribeTopics s ts = mapM_ (subscribe s) ts
 
-bindSocket' :: Z.Socket Pub -> ZMQConnectInfo -> IO ()
-bindSocket' s (ZMQConnectInfo h _)= do
-   infoM "rabbit0mq.connect-socket" "ZMQ conntected"
-   Z.bind s h
+initSocket' :: Z.Socket Pub -> ZMQConnectInfo -> IO ()
+initSocket' s (ZMQConnectInfo h dir _)= do
+   infoM "rabbit0mq.bind-socket'" "ZMQ conntected"
+   case dir of
+      Bind    -> Z.bind s h
+      Connect -> Z.connect s h
 
-bindSocket :: ZMQConnectInfo -> ZMQ z (Socket z Sub)
-bindSocket (ZMQConnectInfo h ts) = do
+initSocket :: ZMQConnectInfo -> ZMQ z (Socket z Sub)
+initSocket (ZMQConnectInfo h dir ts) = do
    s <- socket Sub
    liftIO $ infoM "rabbit0mq.bind-socket" ("ZMQ topics " <> show ts)
    subscribeTopics s ts
-   bind s h
+   case dir of
+      Bind    -> bind s h
+      Connect -> connect s h
    return s
 
 sendZMQ :: Z.Socket Pub -> (Message, Envelope) -> IO ()
@@ -120,8 +128,20 @@ rabbitVars "RABBITVHOST" (RabbitConnectInfo h u p _) v = RabbitConnectInfo h u p
 rabbitVars _ inf _ = inf
 
 zmqVars :: String -> ZMQConnectInfo -> String -> ZMQConnectInfo
-zmqVars "ZMQHOST" (ZMQConnectInfo _ ts) h = ZMQConnectInfo h ts
+zmqVars "ZMQHOST" (ZMQConnectInfo _ dir ts) h = let (dsn,dir') = splitDsn h in
+   ZMQConnectInfo dsn (fromMaybe dir dir') ts
 zmqVars _ inf _ = inf
+
+splitDsn :: String -> (String, Maybe ZMQConnectDirection)
+splitDsn s = case break (== ';') s of
+               (dsn, "")    -> (dsn, Nothing)
+               (dsn, dir)   -> (dsn, parseDirection (tail dir))
+
+parseDirection :: String -> Maybe ZMQConnectDirection
+parseDirection s = case s of
+   "bind"    -> Just Bind
+   "connect" -> Just Connect
+   _         -> Nothing
 
 --------------------------------------------------------------------------------
 -- main
@@ -142,13 +162,13 @@ main = do
       else ztor zenv renv
 
 rtoz :: ZMQConnectInfo -> RabbitConnectInfo -> IO ()
-rtoz zenv@(ZMQConnectInfo _ ts) renv = withChannel renv $ \ch -> do
+rtoz zenv@(ZMQConnectInfo _ _ ts) renv = withChannel renv $ \ch -> do
    qname <- configChannel' (map E.decodeUtf8 ts) ch 
    infoM "rabbit0mq.main" "RabbitMQ connected (reversed)"
    Z.withContext $ \ctx -> do   
       Z.withSocket ctx Z.Pub $ \s -> do
-         bindSocket' s zenv
-         liftIO $ infoM "rabbit0mq.rtoz" "ZeroMQ bound"
+         initSocket' s zenv
+         liftIO $ infoM "rabbit0mq.rtoz" (show zenv)
          void . liftIO $ consumeMsgs ch qname NoAck (sendZMQ s)
          forever $ threadDelay 60000000
 
@@ -157,8 +177,8 @@ ztor zenv renv = withChannel renv $ \ch -> do
    configChannel ch
    infoM "rabbit0mq.main" "RabbitMQ connected" 
    runZMQ $ do
-      s <- bindSocket zenv 
-      liftIO $ infoM "rabbit0mq.ztor" "ZeroMQ bound"
+      s <- initSocket zenv 
+      liftIO $ infoM "rabbit0mq.ztor" (show zenv)
       forever . withMessage s $ liftIO . sendRabbit ch eventExchangeName
 
 fromStrict :: B.ByteString -> LB.ByteString
