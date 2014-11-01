@@ -17,10 +17,10 @@ import qualified Data.ByteString.Lazy   as LB
 import qualified Data.Text              as T
 import qualified Data.Text.Encoding     as E
 import qualified Network.AMQP           as A
-import qualified System.ZMQ3            as Z
+import qualified System.ZMQ4            as Z
 import System.Log.Logger
 import Network.AMQP
-import System.ZMQ3.Monadic
+import System.ZMQ4.Monadic
 
 --------------------------------------------------------------------------------
 -- zmq api
