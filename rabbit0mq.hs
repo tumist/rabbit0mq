@@ -46,7 +46,7 @@ subscribeTopics s ts = mapM_ (subscribe s) ts
 
 initSocket' :: Z.Socket Pub -> ZMQConnectInfo -> IO ()
 initSocket' s (ZMQConnectInfo h dir _)= do
-   infoM "rabbit0mq.bind-socket'" "ZMQ conntected"
+   infoM "rabbit0mq.bind-socket'" "ZMQ connected"
    case dir of
       Bind    -> Z.bind s h
       Connect -> Z.connect s h
