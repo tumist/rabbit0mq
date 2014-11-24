@@ -80,13 +80,13 @@ defaultRabbitConnectInfo = RabbitConnectInfo "127.0.0.1" "guest" "guest" "/"
 eventExchangeName :: Text
 eventExchangeName = "pmo.events"
 
-sendRabbit :: A.Channel -> Text -> [B.ByteString] -> IO ()
-sendRabbit _ _ [] = return ()
-sendRabbit ch key (topic:messages) = do
+sendRabbit :: A.Channel -> Text -> DeliveryMode -> [B.ByteString] -> IO ()
+sendRabbit _ _ _ [] = return ()
+sendRabbit ch key m (topic:messages) = do
    infoM "rabbit0mq.send-rabbit" (C.unpack topic)
    publishMsg ch key ("spud-webb." <> E.decodeUtf8 topic) (toMsg messages)
    where 
-      toMsg bs = newMsg { msgBody = concatBS bs }
+      toMsg bs = newMsg { msgBody = concatBS bs, msgDeliveryMode = Just m }
       concatBS = LB.concat . map fromStrict
    
 withChannel :: RabbitConnectInfo -> (A.Channel -> IO a) -> IO a
@@ -153,13 +153,15 @@ main = do
    noticeM "rabbit0mq.main" "Program starting"
    env <- getEnvironment
    let reversed = maybe False (const True) $ lookup "REVERSE" env
+   let deliverymode = maybe NonPersistent (const Persistent) $ lookup "PERSISTENT" env
    let renv = getVars rabbitVars defaultRabbitConnectInfo env
    debugM "rabbit0mq.main" (show renv)
+   debugM "rabbit0mq.main" ("Delivery mode: " ++ show deliverymode)
    zenv <- liftM (setZMQTopics (getVars zmqVars defaultZMQConnectInfo env) . map C.pack) getArgs
    debugM "rabbit0mq.main" (show zenv)
    if reversed
       then rtoz zenv renv
-      else ztor zenv renv
+      else ztor zenv renv deliverymode
 
 rtoz :: ZMQConnectInfo -> RabbitConnectInfo -> IO ()
 rtoz zenv@(ZMQConnectInfo _ _ ts) renv = withChannel renv $ \ch -> do
@@ -172,14 +174,14 @@ rtoz zenv@(ZMQConnectInfo _ _ ts) renv = withChannel renv $ \ch -> do
          void . liftIO $ consumeMsgs ch qname NoAck (sendZMQ s)
          forever $ threadDelay 60000000
 
-ztor :: ZMQConnectInfo -> RabbitConnectInfo -> IO ()
-ztor zenv renv = withChannel renv $ \ch -> do
+ztor :: ZMQConnectInfo -> RabbitConnectInfo -> DeliveryMode -> IO ()
+ztor zenv renv m = withChannel renv $ \ch -> do
    configChannel ch
    infoM "rabbit0mq.main" "RabbitMQ connected" 
    runZMQ $ do
       s <- initSocket zenv 
       liftIO $ infoM "rabbit0mq.ztor" (show zenv)
-      forever . withMessage s $ liftIO . sendRabbit ch eventExchangeName
+      forever . withMessage s $ liftIO . sendRabbit ch eventExchangeName m
 
 fromStrict :: B.ByteString -> LB.ByteString
 fromStrict = LB.pack . B.unpack

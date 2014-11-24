@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                rabbit0mq
-version:             0.1.0.0
+version:             0.1.0.1
 synopsis:            A bridge between ZeroMQ and RabbitMQ
 -- description:         
 homepage:            https://github.com/gislik/rabbit0mq
